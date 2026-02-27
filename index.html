@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow’s Livestream - Secure Surveillance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- HLS.js library for playing .m3u8 streams in browsers -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .scanline {
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
+        
+        @keyframes spin-slow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow { animation: spin-slow 8s linear infinite; }
+        
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: black;
+        }
+        .video-container:fullscreen {
+            padding: 0;
+            background: black;
+        }
+        .video-container:fullscreen .scanline,
+        .video-container:fullscreen .absolute {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-[#050505] text-white min-h-screen overflow-x-hidden">
+    <div id="app">
+        <!-- Content will be injected here by script -->
+    </div>
+    <script>
+        /**
+         * Shadow’s Livestream - Vanilla JavaScript Implementation
+         * Consolidated for local portability.
+         */
+
+        const CONFIG = {
+            CAMERAS_PER_PAGE: 9,
+            ROTATION_INTERVAL: 40000, // 40 seconds
+            CREDENTIALS: {
+                user: "admin",
+                pass: "password123"
+            },
+            /**
+             * VIDEO STREAM CONFIGURATION
+             * Add your cameras here with custom names and locations.
+             */
+            STREAMS: [
+               { name: "Nagole 1", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 2", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 3", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 4", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 5", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 6", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 7", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 8", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 9", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 10", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "Nagole 11", location: "Nagole", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera1/index.m3u8" },
+                { name: "IBT 1", location: "IBT", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera2/index.m3u8" },
+                { name: "IBT 2", location: "IBT", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera3/index.m3u8" },
+                { name: "IBT 3", location: "IBT", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera4/index.m3u8" },
+                { name: "Katedan 1", location: "Katedan", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera5/index.m3u8" },
+                { name: "Chandanagar 1", location: "Chandanagar", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera6/index.m3u8" },
+                { name: "Chandanagar 2", location: "Chandanagar", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera7/index.m3u8" },
+                { name: "Chandanagar 3", location: "Chandanagar", url: "https://print-possibly-optimize-stops.trycloudflare.com/mycamera8/index.m3u8" },
+            ]
+        };
+
+        let state = {
+            isLoggedIn: false,
+            currentPage: 0,
+            totalPages: 0,
+            isAutoRotating: true,
+            rotationTimer: null,
+            searchQuery: "",
+            activeBuffer: 'A', // 'A' or 'B'
+            bufferPages: { A: -1, B: -1 } // Track which page is in which buffer
+        };
+
+        // Track HLS instances for cleanup
+        let activeHlsInstances = { A: [], B: [] };
+
+        function cleanupHls(bufferId) {
+            if (bufferId) {
+                activeHlsInstances[bufferId].forEach(hls => {
+                    hls.detachMedia();
+                    hls.destroy();
+                });
+                activeHlsInstances[bufferId] = [];
+            } else {
+                // Cleanup both
+                cleanupHls('A');
+                cleanupHls('B');
+            }
+        }
+
+        function init() {
+            // Fullscreen change listener to pause/resume rotation
+            const handleFullscreenChange = () => {
+                const isFullscreen = !!(document.fullscreenElement || 
+                                       document.webkitFullscreenElement || 
+                                       document.mozFullScreenElement || 
+                                       document.msFullscreenElement);
+                
+                if (isFullscreen) {
+                    stopRotation();
+                } else {
+                    if (state.isAutoRotating && state.isLoggedIn) {
+                        startRotation();
+                    }
+                }
+            };
+
+            document.addEventListener('fullscreenchange', handleFullscreenChange);
+            document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+            document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+            document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+            render();
+        }
+
+        function render() {
+            const app = document.getElementById('app');
+            if (state.isLoggedIn) {
+                renderDashboard(app);
+            } else {
+                renderLogin(app);
+            }
+        }
+
+        function renderLogin(container) {
+            container.innerHTML = `
+                <div class="min-h-screen flex items-center justify-center p-4 bg-[#0a0a0a]">
+                    <div class="w-full max-w-md bg-[#141414] border border-white/10 rounded-2xl p-8 shadow-2xl animate-fade-in">
+                        <div class="flex flex-col items-center mb-8">
+                            <div class="w-16 h-16 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-4 border border-emerald-500/20">
+                                <svg class="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                            </div>
+                            <h1 class="text-2xl font-bold text-white tracking-tight">Shadow’s Livestream</h1>
+                            <p class="text-zinc-500 text-sm mt-1">Surveillance Management System</p>
+                        </div>
+
+                        <form id="loginForm" class="space-y-6">
+                            <div class="space-y-2">
+                                <label class="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Username</label>
+                                <div class="relative">
+                                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                                    </span>
+                                    <input type="text" id="username" class="w-full bg-zinc-900 border border-white/5 rounded-xl py-3 pl-11 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all" placeholder="Enter username" required>
+                                </div>
+                            </div>
+
+                            <div class="space-y-2">
+                                <label class="text-xs font-semibold text-zinc-400 uppercase tracking-wider ml-1">Password</label>
+                                <div class="relative">
+                                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                                    </span>
+                                    <input type="password" id="password" class="w-full bg-zinc-900 border border-white/5 rounded-xl py-3 pl-11 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all" placeholder="Enter password" required>
+                                </div>
+                            </div>
+
+                            <div id="loginError" class="hidden flex items-center gap-2 text-red-400 text-sm bg-red-400/10 p-3 rounded-lg border border-red-400/20">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                Invalid credentials.
+                            </div>
+
+                            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-emerald-900/20 active:scale-[0.98]">
+                                Sign In
+                            </button>
+                        </form>
+
+                        <div class="mt-8 pt-6 border-t border-white/5 text-center">
+                            <p class="text-zinc-600 text-xs">Authorized Personnel Only. All access is logged.</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('loginForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const u = document.getElementById('username').value;
+                const p = document.getElementById('password').value;
+                if (u === CONFIG.CREDENTIALS.user && p === CONFIG.CREDENTIALS.pass) {
+                    state.isLoggedIn = true;
+                    startRotation();
+                    render();
+                } else {
+                    document.getElementById('loginError').classList.remove('hidden');
+                }
+            });
+        }
+
+        function renderDashboard(container) {
+            // Check if we need to render the skeleton
+            let dashboardRoot = document.getElementById('dashboard-root');
+            if (!dashboardRoot) {
+                cleanupHls();
+                container.innerHTML = `
+                    <div id="dashboard-root" class="min-h-screen h-screen overflow-hidden bg-[#050505] text-white flex flex-col">
+                        <header class="h-14 border-b border-white/5 bg-[#0a0a0a]/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+                                    <svg class="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                </div>
+                                <div>
+                                    <h2 class="font-bold text-sm tracking-tight text-emerald-500">Shadow’s Livestream</h2>
+                                    <p class="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">${CONFIG.STREAMS.length} Stream Network</p>
+                                </div>
+                            </div>
+
+                            <div class="flex-1 max-w-md mx-8">
+                                <div class="relative">
+                                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                    </span>
+                                    <input type="text" id="searchInput" class="w-full bg-white/5 border border-white/10 rounded-full py-1.5 pl-10 pr-4 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all" placeholder="Search by camera or location...">
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-6">
+                                <div class="hidden md:flex items-center gap-4 text-xs font-medium text-zinc-400">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                        SYSTEM ACTIVE
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-3 bg-white/5 rounded-full pl-4 pr-1 py-1 border border-white/5">
+                                    <span class="text-xs font-medium text-zinc-300">${CONFIG.CREDENTIALS.user}</span>
+                                    <button id="logoutBtn" class="p-2 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </header>
+
+                        <main class="flex-1 min-h-0 p-3 flex flex-col gap-2 overflow-hidden">
+                            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 shrink-0">
+                                <div id="page-info-container" class="flex items-baseline gap-3">
+                                    <!-- Dynamic Page Info -->
+                                </div>
+
+                                <div class="flex items-center gap-2">
+                                    <button id="toggleRotation" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all border">
+                                        <!-- Dynamic Rotation Text -->
+                                    </button>
+                                    
+                                    <div class="flex items-center gap-1 bg-white/5 rounded-lg p-0.5 border border-white/10">
+                                        <button id="prevBtn" class="px-2 py-1 hover:bg-white/10 rounded-md text-[10px] transition-colors">Prev</button>
+                                        <div id="pagination-text" class="px-2 text-[10px] font-mono text-zinc-500"></div>
+                                        <button id="nextBtn" class="px-2 py-1 hover:bg-white/10 rounded-md text-[10px] transition-colors">Next</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="gridContainer" class="flex-1 min-h-0 relative overflow-hidden rounded-xl border border-white/5 bg-[#0a0a0a]">
+                                <div id="grid-A" class="absolute inset-0 grid gap-2 p-2 transition-opacity duration-500 z-10"></div>
+                                <div id="grid-B" class="absolute inset-0 grid gap-2 p-2 transition-opacity duration-500 opacity-0 pointer-events-none z-0"></div>
+                            </div>
+                        </main>
+
+                        <footer class="h-8 bg-[#0a0a0a] border-t border-white/5 px-6 flex items-center justify-between text-[9px] text-zinc-500 font-medium uppercase tracking-widest shrink-0">
+                            <div class="flex items-center gap-4">
+                                <span>Server: Live</span>
+                            </div>
+                            <div>Shadow’s Livestream v5.1.0</div>
+                        </footer>
+                    </div>
+                `;
+
+                // Attach stable listeners
+                document.getElementById('searchInput').addEventListener('input', (e) => {
+                    state.searchQuery = e.target.value;
+                    state.currentPage = 0;
+                    state.bufferPages = { A: -1, B: -1 }; // Reset buffers
+                    renderDashboard(container);
+                });
+
+                document.getElementById('logoutBtn').addEventListener('click', () => {
+                    state.isLoggedIn = false;
+                    state.bufferPages = { A: -1, B: -1 };
+                    stopRotation();
+                    render();
+                });
+
+                document.getElementById('toggleRotation').addEventListener('click', () => {
+                    state.isAutoRotating = !state.isAutoRotating;
+                    if (state.isAutoRotating) startRotation();
+                    else stopRotation();
+                    renderDashboard(container);
+                });
+
+                document.getElementById('prevBtn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (state.totalPages > 1) {
+                        const nextIdx = (state.currentPage - 1 + state.totalPages) % state.totalPages;
+                        switchPage(nextIdx);
+                    }
+                });
+
+                document.getElementById('nextBtn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (state.totalPages > 1) {
+                        const nextIdx = (state.currentPage + 1) % state.totalPages;
+                        switchPage(nextIdx);
+                    }
+                });
+            }
+
+            // 1. Calculate Pages
+            const allCams = CONFIG.STREAMS.map((s, i) => ({
+                id: i + 1,
+                name: s.name,
+                location: s.location,
+                streamUrl: s.url
+            }));
+
+            const filteredStreams = allCams.filter(s => 
+                s.name.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
+                s.location.toLowerCase().includes(state.searchQuery.toLowerCase())
+            );
+
+            const groups = {};
+            filteredStreams.forEach(s => {
+                if (!groups[s.location]) groups[s.location] = [];
+                groups[s.location].push(s);
+            });
+
+            const pages = [];
+            Object.keys(groups).sort().forEach(location => {
+                const locationCams = groups[location];
+                const totalChunks = Math.ceil(locationCams.length / CONFIG.CAMERAS_PER_PAGE);
+                for (let i = 0; i < locationCams.length; i += CONFIG.CAMERAS_PER_PAGE) {
+                    pages.push({
+                        location: location,
+                        cameras: locationCams.slice(i, i + CONFIG.CAMERAS_PER_PAGE),
+                        chunkIndex: Math.floor(i / CONFIG.CAMERAS_PER_PAGE) + 1,
+                        totalChunks: totalChunks
+                    });
+                }
+            });
+
+            state.totalPages = pages.length;
+            if (state.currentPage >= state.totalPages && state.totalPages > 0) {
+                state.currentPage = state.totalPages - 1;
+            }
+
+            // 2. Initial Setup or Buffer Swap
+            if (state.totalPages === 0) {
+                cleanupHls();
+                state.bufferPages = { A: -1, B: -1 };
+                const gridA = document.getElementById('grid-A');
+                const gridB = document.getElementById('grid-B');
+                if (gridA && gridB) {
+                    gridA.innerHTML = `
+                        <div class="col-span-full row-span-full flex flex-col items-center justify-center text-zinc-500 gap-4 w-full h-full">
+                            <svg class="w-12 h-12 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                            <p class="text-sm">No cameras found for "${state.searchQuery}"</p>
+                        </div>
+                    `;
+                    gridB.innerHTML = '';
+                    gridA.style.gridTemplateColumns = '1fr';
+                    gridA.style.gridTemplateRows = '1fr';
+                    gridA.classList.remove('opacity-0', 'pointer-events-none', 'z-0');
+                    gridA.classList.add('z-10');
+                    gridB.classList.add('opacity-0', 'pointer-events-none', 'z-0');
+                    gridB.classList.remove('z-10');
+                }
+            } else {
+                const activeBuffer = state.activeBuffer;
+                const inactiveBuffer = activeBuffer === 'A' ? 'B' : 'A';
+
+                // Ensure current page is in active buffer
+                if (state.bufferPages[activeBuffer] !== state.currentPage) {
+                    setupGrid(activeBuffer, pages[state.currentPage], state.currentPage);
+                }
+
+                // Preload next page in inactive buffer
+                if (state.totalPages > 1) {
+                    const nextPageIdx = (state.currentPage + 1) % state.totalPages;
+                    if (state.bufferPages[inactiveBuffer] !== nextPageIdx) {
+                        setupGrid(inactiveBuffer, pages[nextPageIdx], nextPageIdx);
+                    }
+                }
+            }
+
+            // 3. Update UI Elements
+            updateUI(pages);
+        }
+
+        function switchPage(nextIdx) {
+            const activeBuffer = state.activeBuffer;
+            const inactiveBuffer = activeBuffer === 'A' ? 'B' : 'A';
+
+            if (state.bufferPages[inactiveBuffer] === nextIdx) {
+                // Swap buffers
+                state.activeBuffer = inactiveBuffer;
+                state.currentPage = nextIdx;
+                
+                const gridA = document.getElementById('grid-A');
+                const gridB = document.getElementById('grid-B');
+                
+                if (state.activeBuffer === 'A') {
+                    gridA.classList.remove('opacity-0', 'pointer-events-none', 'z-0');
+                    gridA.classList.add('z-10');
+                    gridB.classList.add('opacity-0', 'pointer-events-none', 'z-0');
+                    gridB.classList.remove('z-10');
+                } else {
+                    gridB.classList.remove('opacity-0', 'pointer-events-none', 'z-0');
+                    gridB.classList.add('z-10');
+                    gridA.classList.add('opacity-0', 'pointer-events-none', 'z-0');
+                    gridA.classList.remove('z-10');
+                }
+
+                // Preload the NEXT page in the now-inactive buffer
+                const container = document.getElementById('app');
+                renderDashboard(container);
+            } else {
+                // Full re-render if not preloaded
+                state.currentPage = nextIdx;
+                renderDashboard(document.getElementById('app'));
+            }
+        }
+
+        function updateUI(pages) {
+            const currentPageData = pages[state.currentPage] || { location: "", cameras: [], chunkIndex: 0, totalChunks: 0 };
+            const currentCams = currentPageData.cameras;
+
+            // 1. Update Page Info
+            const infoContainer = document.getElementById('page-info-container');
+            if (infoContainer) {
+                infoContainer.innerHTML = `
+                    <h1 class="text-base font-bold tracking-tight leading-none text-white">${currentPageData.location || 'Surveillance Grid'}</h1>
+                    ${currentPageData.totalChunks > 1 ? `<span class="text-[10px] text-zinc-500 font-mono">PART ${currentPageData.chunkIndex} OF ${currentPageData.totalChunks}</span>` : ''}
+                    <p class="text-zinc-500 text-[10px]">
+                        ${state.totalPages > 0 
+                            ? `Group: ${state.currentPage + 1} of ${state.totalPages} (${currentCams.length} Cameras)`
+                            : 'No matching cameras found'}
+                    </p>
+                `;
+            }
+
+            // 2. Update Rotation Button
+            const rotationBtn = document.getElementById('toggleRotation');
+            if (rotationBtn) {
+                rotationBtn.className = `flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-medium transition-all border ${state.isAutoRotating ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-white/5 border-white/10 text-zinc-400 hover:text-white'}`;
+                rotationBtn.innerHTML = `
+                    <svg class="w-3 h-3 ${state.isAutoRotating ? 'animate-spin-slow' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    ${state.isAutoRotating ? 'Auto-Rotating' : 'Rotation Paused'}
+                `;
+            }
+
+            // 3. Update Pagination Text
+            const pagText = document.getElementById('pagination-text');
+            if (pagText) {
+                pagText.innerText = `${String(state.currentPage + 1).padStart(2, '0')} / ${state.totalPages || 1}`;
+            }
+        }
+
+        function setupGrid(bufferId, pageData, pageIdx) {
+            if (!pageData) return;
+            
+            cleanupHls(bufferId);
+            state.bufferPages[bufferId] = pageIdx;
+            
+            const grid = document.getElementById(`grid-${bufferId}`);
+            const currentCams = pageData.cameras;
+
+            // Calculate Dynamic Grid
+            const count = currentCams.length;
+            let cols, rows;
+            if (count <= 1) { cols = 1; rows = 1; }
+            else if (count <= 2) { cols = 2; rows = 1; }
+            else if (count <= 4) { cols = 2; rows = 2; }
+            else if (count <= 6) { cols = 3; rows = 2; }
+            else { cols = 3; rows = 3; }
+
+            grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+
+            grid.innerHTML = currentCams.map((cam, idx) => `
+                <div id="container-${bufferId}-${idx}" class="video-container relative group overflow-hidden rounded-lg bg-black border border-white/5 flex flex-col animate-fade-in h-full w-full">
+                    <div class="absolute top-0 inset-x-0 p-2 bg-gradient-to-b from-black/80 to-transparent z-10 flex justify-between items-start opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div>
+                            <h3 class="text-[10px] font-bold text-white uppercase tracking-wider">${cam.name}</h3>
+                            <p class="text-[8px] text-zinc-400 font-medium">${cam.location}</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleFullscreen('video-${bufferId}-${idx}')" class="p-1 hover:bg-white/20 rounded transition-colors text-white/70 hover:text-white" title="Fullscreen">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                            </button>
+                            <div class="px-1.5 py-0.5 bg-red-600 rounded text-[8px] font-black tracking-tighter">REC</div>
+                        </div>
+                    </div>
+                    <div class="relative flex-1 bg-zinc-900 overflow-hidden min-h-0">
+                        <video id="video-${bufferId}-${idx}" class="video-stream w-full h-full object-cover" muted playsinline autoplay crossorigin="anonymous"></video>
+                        
+                        <!-- Loading/Error Overlay -->
+                        <div id="status-${bufferId}-${idx}" class="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-20 transition-opacity duration-300">
+                            <div class="status-icon w-6 h-6 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mb-2"></div>
+                            <span class="status-text text-[10px] font-medium text-emerald-500 uppercase tracking-widest animate-pulse">Connecting...</span>
+                            <button onclick="retryStream('${bufferId}', ${idx})" class="retry-btn hidden mt-3 px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-[9px] uppercase tracking-wider transition-colors">Retry Connection</button>
+                        </div>
+
+                        <div class="scanline"></div>
+                        <div class="absolute bottom-2 left-2 flex items-center gap-1.5">
+                            <div class="w-1 h-1 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
+                            <span class="text-[8px] font-mono text-white/70 tracking-tight">LIVE • ${new Date().toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                    <div class="p-1.5 bg-zinc-900/50 border-t border-white/5 flex justify-between items-center shrink-0">
+                        <span class="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">${cam.name}</span>
+                    </div>
+                </div>
+            `).join('');
+
+            // Initialize HLS for each video element
+            currentCams.forEach((cam, idx) => {
+                const video = document.getElementById(`video-${bufferId}-${idx}`);
+                const statusOverlay = document.getElementById(`status-${bufferId}-${idx}`);
+                
+                const updateStatus = (msg, isError = false) => {
+                    if (!statusOverlay) return;
+                    statusOverlay.style.opacity = '1';
+                    statusOverlay.style.display = 'flex';
+                    
+                    const icon = statusOverlay.querySelector('.status-icon');
+                    const text = statusOverlay.querySelector('.status-text');
+                    const retryBtn = statusOverlay.querySelector('.retry-btn');
+
+                    if (isError) {
+                        icon.innerHTML = '<svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+                        icon.classList.remove('animate-spin', 'border-2', 'border-emerald-500/30', 'border-t-emerald-500');
+                        text.classList.remove('text-emerald-500', 'animate-pulse');
+                        text.classList.add('text-red-500');
+                        if (retryBtn) retryBtn.classList.remove('hidden');
+                    } else {
+                        icon.innerHTML = '';
+                        icon.classList.add('animate-spin', 'border-2', 'border-emerald-500/30', 'border-t-emerald-500');
+                        text.classList.add('text-emerald-500', 'animate-pulse');
+                        text.classList.remove('text-red-500');
+                        if (retryBtn) retryBtn.classList.add('hidden');
+                    }
+                    text.innerText = msg;
+                };
+
+                const hideStatus = () => {
+                    if (statusOverlay) {
+                        statusOverlay.style.opacity = '0';
+                        setTimeout(() => { 
+                            if (statusOverlay) statusOverlay.style.display = 'none'; 
+                        }, 300);
+                    }
+                };
+
+                if (Hls.isSupported()) {
+                    const hls = new Hls({
+                        manifestLoadingMaxRetry: 30,
+                        manifestLoadingRetryDelay: 1000,
+                        levelLoadingMaxRetry: 30,
+                        fragLoadingMaxRetry: 30,
+                        enableWorker: true,
+                        lowLatencyMode: true,
+                        backBufferLength: 90,
+                        autoStartLoad: true
+                    });
+                    
+                    hls.attachMedia(video);
+                    hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+                        if (cam.streamUrl) hls.loadSource(cam.streamUrl);
+                    });
+                    
+                    activeHlsInstances[bufferId].push(hls);
+
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        video.play().catch(() => {});
+                    });
+
+                    hls.on(Hls.Events.FRAG_BUFFERED, () => {
+                        hideStatus();
+                    });
+
+                    hls.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    updateStatus('Network Error', true);
+                                    hls.startLoad();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    updateStatus('Media Error', true);
+                                    hls.recoverMediaError();
+                                    break;
+                                default:
+                                    updateStatus('Unavailable', true);
+                                    break;
+                            }
+                        }
+                    });
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = cam.streamUrl;
+                    video.addEventListener('loadedmetadata', () => {
+                        video.play().catch(() => {});
+                        hideStatus();
+                    });
+                    video.addEventListener('error', () => {
+                        updateStatus('Unavailable', true);
+                    });
+                }
+            });
+        }
+
+        function startRotation() {
+            stopRotation();
+            if (state.isAutoRotating) {
+                state.rotationTimer = setInterval(() => {
+                    // 1. Filter streams based on search
+                    const filteredStreams = CONFIG.STREAMS.filter(s => 
+                        s.name.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
+                        s.location.toLowerCase().includes(state.searchQuery.toLowerCase())
+                    );
+
+                    // 2. Group by location
+                    const groups = {};
+                    filteredStreams.forEach(s => {
+                        if (!groups[s.location]) groups[s.location] = [];
+                        groups[s.location].push(s);
+                    });
+
+                    // 3. Create "Virtual Pages"
+                    const pages = [];
+                    Object.keys(groups).sort().forEach(location => {
+                        const locationCams = groups[location];
+                        for (let i = 0; i < locationCams.length; i += CONFIG.CAMERAS_PER_PAGE) {
+                            pages.push({ location });
+                        }
+                    });
+
+                    state.totalPages = pages.length;
+                    if (state.totalPages > 1) {
+                        const nextIdx = (state.currentPage + 1) % state.totalPages;
+                        switchPage(nextIdx);
+                    }
+                }, CONFIG.ROTATION_INTERVAL);
+            }
+        }
+
+        function stopRotation() {
+            if (state.rotationTimer) {
+                clearInterval(state.rotationTimer);
+                state.rotationTimer = null;
+            }
+        }
+
+        function toggleFullscreen(videoId) {
+            const video = document.getElementById(videoId);
+            if (video.requestFullscreen) {
+                video.requestFullscreen();
+            } else if (video.webkitRequestFullscreen) { /* Safari */
+                video.webkitRequestFullscreen();
+            } else if (video.msRequestFullscreen) { /* IE11 */
+                video.msRequestFullscreen();
+            }
+        }
+
+        function retryStream(bufferId, idx) {
+            const container = document.getElementById('app');
+            state.bufferPages = { A: -1, B: -1 };
+            renderDashboard(container);
+        }
+
+        // Initial call
+        init();
+    </script>
+</body>
+</html>
+
